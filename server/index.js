@@ -2,7 +2,6 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import rateLimit from "express-rate-limit";
-import { generateExplanation } from "./gemini.js";
 import geminiRoutes from "./routes/gemini.routes.js";
 
 dotenv.config();
@@ -31,7 +30,7 @@ app.get("/api/health", (req, res) => {
 });
 
 
-app.post("/api/gemini/explain", generateExplanation);
+
 app.use("/api/gemini", geminiRoutes);
 
 app.listen(PORT, () => {
