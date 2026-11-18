@@ -23,10 +23,6 @@ const json = (data: unknown, status = 200) =>
     status,
     headers: { "Content-Type": "application/json" },
   });
-const generated = (data: unknown) =>
-  json({
-    candidates: [{ content: { parts: [{ text: JSON.stringify(data) }] } }],
-  });
 const fakeStorage = () => {
   const map = new Map<string, string>();
   return {
@@ -41,71 +37,118 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 describe("Gemini browser client", () => {
-  it("sends keys only in headers to Google and never in URL or body", async () => {
-    const fetch = vi.fn().mockResolvedValue(generated(demos[1]));
-    vi.stubGlobal("fetch", fetch);
-    await generateLesson("A bat flew", cfg);
-    const [url, options] = fetch.mock.calls[0];
-    expect(new URL(url).origin).toBe(
-      "https://generativelanguage.googleapis.com",
+
+  it("sends lesson requests to our backend without exposing the API key", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      json({ success: true, lesson: demos[1] }),
     );
-    expect(url).not.toContain(cfg.key);
-    expect(options.body).not.toContain(cfg.key);
-    expect(options.headers["x-goog-api-key"]).toBe(cfg.key);
-    expect(options.redirect).toBe("error");
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const lesson = await generateLesson("A bat flew", cfg);
+
+    expect(lesson.safe).toBe(true);
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    const [url, options] = fetchMock.mock.calls[0];
+
+    expect(url).toBe("/api/gemini/lesson");
+    expect(options.method).toBe("POST");
+    expect(options.headers["Content-Type"]).toBe("application/json");
+
+    expect(JSON.parse(options.body)).toEqual({
+      sentence: "A bat flew",
+    });
+
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain(cfg.key);
   });
-  it("discovers all models using pagination", async () => {
-    const fetch = vi
-      .fn()
-      .mockResolvedValueOnce(
-        json({
-          models: [
-            {
-              name: "models/a",
-              supportedGenerationMethods: ["generateContent"],
-            },
-          ],
-          nextPageToken: "page2",
-        }),
-      )
-      .mockResolvedValueOnce(
-        json({
-          models: [
-            { name: "models/b", supportedGenerationMethods: ["embedContent"] },
-          ],
-        }),
-      );
-    vi.stubGlobal("fetch", fetch);
-    expect(await listModels(cfg.key)).toHaveLength(2);
-    expect(fetch.mock.calls[1][0]).toContain("pageToken=page2");
+
+
+  it("fetches models from our backend without exposing the API key", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      json({
+        models: [
+          {
+            name: "models/a",
+            displayName: "Model A",
+            supportedGenerationMethods: ["generateContent"],
+          },
+          {
+            name: "models/b",
+            displayName: "Model B",
+            supportedGenerationMethods: ["embedContent"],
+          },
+        ],
+      }),
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const models = await listModels(cfg.key);
+
+    expect(models).toHaveLength(2);
+    expect(models[0].name).toBe("models/a");
+    expect(models[1].name).toBe("models/b");
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    const [url, options] = fetchMock.mock.calls[0];
+
+    expect(url).toBe("/api/gemini/models");
+    expect(options.method).toBe("GET");
+
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain(cfg.key);
   });
-  it("retries invalid JSON once, then returns the validated lesson", async () => {
-    const fetch = vi
-      .fn()
-      .mockResolvedValueOnce(generated({ safe: true }))
-      .mockResolvedValueOnce(generated(demos[1]));
-    vi.stubGlobal("fetch", fetch);
-    expect((await generateLesson("The bat flew", cfg)).safe).toBe(true);
-    expect(fetch).toHaveBeenCalledTimes(2);
+
+
+  it("accepts a valid backend lesson with one request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      json({
+        success: true,
+        lesson: demos[1],
+      }),
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const lesson = await generateLesson("The bat flew", cfg);
+
+    expect(lesson.safe).toBe(true);
+    expect(lesson.sentence).toBe("The bat flew");
+
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
-  it("fails after exactly two invalid responses", async () => {
-    const fetch = vi
-      .fn()
-      .mockImplementation(() => Promise.resolve(generated({ safe: true })));
-    vi.stubGlobal("fetch", fetch);
+
+  it("rejects an invalid backend lesson without retrying", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      json({ success: true, lesson: { safe: true } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
     await expect(generateLesson("The bat flew", cfg)).rejects.toMatchObject({
       code: "errorData",
     });
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
+
   it("never retries or renders unsafe lessons", async () => {
-    const fetch = vi.fn().mockResolvedValue(generated({ safe: false }));
-    vi.stubGlobal("fetch", fetch);
-    await expect(generateLesson("test sentence", cfg)).rejects.toMatchObject({
+    const fetchMock = vi.fn().mockResolvedValue(
+      json({
+        success: false,
+        error: "CONTENT_BLOCKED",
+      }),
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      generateLesson("test sentence", cfg),
+    ).rejects.toMatchObject({
       code: "errorBlocked",
     });
-    expect(fetch).toHaveBeenCalledTimes(1);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
+
   it.each([
     [401, "errorKey"],
     [429, "errorQuota"],
@@ -130,7 +173,14 @@ describe("Gemini browser client", () => {
       "fetch",
       vi
         .fn()
-        .mockResolvedValue(json({ promptFeedback: { blockReason: "SAFETY" } })),
+
+        .mockResolvedValue(
+          json({
+            success: false,
+            error: "CONTENT_BLOCKED",
+          }),
+        ),
+
     );
     await expect(generateLesson("test sentence", cfg)).rejects.toMatchObject({
       code: "errorBlocked",
@@ -165,18 +215,15 @@ describe("Gemini browser client", () => {
     expect(result.vectors).toHaveLength(4);
     expect(result.vectors[0].values).toHaveLength(3);
   });
-  it("recognizes an invalid API key in a generation request", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(
-          json({ error: { details: [{ reason: "API_KEY_INVALID" }] } }, 400),
-        ),
+  it("maps backend HTTP 400 to a request error without inspecting Google-specific payloads", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      json({ error: { details: [{ reason: "API_KEY_INVALID" }] } }, 400),
     );
+    vi.stubGlobal("fetch", fetchMock);
     await expect(generateLesson("A bat flew", cfg)).rejects.toMatchObject({
-      code: "errorKey",
+      code: "errorRequest",
     });
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });
 describe("model availability recovery", () => {
@@ -188,38 +235,31 @@ describe("model availability recovery", () => {
   const old = model("models/gemini-2.5-flash");
   const current = model("models/gemini-3.1-flash-lite");
   const saved = { ...cfg, textModel: old.name, models: [old, current] };
-  it("recovers when a listed model still returns 404, excluding the failed model", async () => {
-    const fetch = vi
-      .fn()
+  it("updates frontend model preference after backend 404 (backend selection not verified)", async () => {
+    const fetchMock = vi.fn()
       .mockResolvedValueOnce(json({}, 404))
       .mockResolvedValueOnce(json({ models: [old, current] }))
-      .mockResolvedValueOnce(generated(demos[1]));
-    vi.stubGlobal("fetch", fetch);
+      .mockResolvedValueOnce(json({ success: true, lesson: demos[1] }));
+    vi.stubGlobal("fetch", fetchMock);
     const onRecovery = vi.fn();
-    const result = await generateLessonWithRecovery(
-      "A bat flew",
-      saved,
-      undefined,
-      onRecovery,
-    );
+    const result = await generateLessonWithRecovery("A bat flew", saved, undefined, onRecovery);
     expect(result.switched).toBe(true);
     expect(result.config.textModel).toBe(current.name);
     expect(result.config.key).toBe(cfg.key);
     expect(result.lesson.sentence).toBe("A bat flew");
     expect(onRecovery).toHaveBeenCalledOnce();
-    expect(fetch.mock.calls.map((c) => c[0])).toEqual([
-      `https://generativelanguage.googleapis.com/v1beta/${old.name}:generateContent`,
-      "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
-      `https://generativelanguage.googleapis.com/v1beta/${current.name}:generateContent`,
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/gemini/lesson", "/api/gemini/models", "/api/gemini/lesson",
     ]);
-    expect(fetch.mock.calls[1][1].cache).toBe("no-store");
-    for (const [url, options] of fetch.mock.calls) {
+    for (const [url, options] of fetchMock.mock.calls) {
       expect(url).not.toContain(cfg.key);
-      expect(options.headers["x-goog-api-key"]).toBe(cfg.key);
+      expect(JSON.stringify(options)).not.toContain(cfg.key);
     }
+    // Known limitation: neither lesson request specifies a model ID.
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({ sentence: "A bat flew" });
   });
   it("keeps a working selected model without extra discovery or generation calls", async () => {
-    const fetch = vi.fn().mockResolvedValue(generated(demos[1]));
+    const fetch = vi.fn().mockResolvedValue(json({ success: true, lesson: demos[1] }));
     vi.stubGlobal("fetch", fetch);
     const result = await generateLessonWithRecovery("A bat flew", saved);
     expect(result.switched).toBe(false);
