@@ -186,34 +186,25 @@ describe("Gemini browser client", () => {
       code: "errorBlocked",
     });
   });
-  it("uses session storage by default, opt-in persistence, and complete removal", () => {
+  it("never persists a user API key and clears legacy stored keys", () => {
     saveConfig(cfg);
-    expect(sessionStorage.getItem("ai-ullil-key")).toBe(cfg.key);
+    expect(sessionStorage.getItem("ai-ullil-key")).toBeNull();
     expect(localStorage.getItem("ai-ullil-key")).toBeNull();
-    saveConfig({ ...cfg, remember: true });
-    expect(sessionStorage.getItem("ai-ullil-key")).toBeNull();
-    expect(loadConfig().remember).toBe(true);
+    expect(loadConfig().key).toBe("backend-managed");
+    localStorage.setItem("ai-ullil-key", "legacy-key");
     removeKey();
-    expect(sessionStorage.getItem("ai-ullil-key")).toBeNull();
     expect(localStorage.getItem("ai-ullil-key")).toBeNull();
   });
-  it("fetches actual token count and one vector per word", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi
-        .fn()
-        .mockImplementation((url: string) =>
-          Promise.resolve(
-            url.includes(":countTokens")
-              ? json({ totalTokens: 9 })
-              : json({ embedding: { values: [0.1, 0.2, 0.3] } }),
-          ),
-        ),
-    );
-    const result = await realNumbers(demos[1], cfg);
+  it("gets token count and embeddings through the backend only", async () => {
+    const words=demos[1].words.map(w=>w.text);
+    const fetchMock=vi.fn().mockResolvedValue(json({count:9,vectors:words.map(word=>({word,values:[0.1,0.2,0.3]}))}));
+    vi.stubGlobal("fetch",fetchMock);
+    const result=await realNumbers(demos[1],cfg);
     expect(result.count).toBe(9);
-    expect(result.vectors).toHaveLength(4);
-    expect(result.vectors[0].values).toHaveLength(3);
+    expect(result.vectors).toHaveLength(words.length);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/gemini/real-numbers");
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain(cfg.key);
   });
   it("maps backend HTTP 400 to a request error without inspecting Google-specific payloads", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
@@ -235,28 +226,10 @@ describe("model availability recovery", () => {
   const old = model("models/gemini-2.5-flash");
   const current = model("models/gemini-3.1-flash-lite");
   const saved = { ...cfg, textModel: old.name, models: [old, current] };
-  it("updates frontend model preference after backend 404 (backend selection not verified)", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(json({}, 404))
-      .mockResolvedValueOnce(json({ models: [old, current] }))
-      .mockResolvedValueOnce(json({ success: true, lesson: demos[1] }));
-    vi.stubGlobal("fetch", fetchMock);
-    const onRecovery = vi.fn();
-    const result = await generateLessonWithRecovery("A bat flew", saved, undefined, onRecovery);
-    expect(result.switched).toBe(true);
-    expect(result.config.textModel).toBe(current.name);
-    expect(result.config.key).toBe(cfg.key);
-    expect(result.lesson.sentence).toBe("A bat flew");
-    expect(onRecovery).toHaveBeenCalledOnce();
-    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
-      "/api/gemini/lesson", "/api/gemini/models", "/api/gemini/lesson",
-    ]);
-    for (const [url, options] of fetchMock.mock.calls) {
-      expect(url).not.toContain(cfg.key);
-      expect(JSON.stringify(options)).not.toContain(cfg.key);
-    }
-    // Known limitation: neither lesson request specifies a model ID.
-    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({ sentence: "A bat flew" });
+  it("does not pretend a frontend preference change can recover a server-owned model", async () => {
+    const fetchMock=vi.fn().mockResolvedValue(json({},404)); vi.stubGlobal("fetch",fetchMock);
+    await expect(generateLessonWithRecovery("A bat flew",saved)).rejects.toMatchObject({code:"errorModelUnavailable"});
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
   it("keeps a working selected model without extra discovery or generation calls", async () => {
     const fetch = vi.fn().mockResolvedValue(json({ success: true, lesson: demos[1] }));
@@ -266,32 +239,10 @@ describe("model availability recovery", () => {
     expect(result.config.textModel).toBe(old.name);
     expect(fetch).toHaveBeenCalledOnce();
   });
-  it("stops after one alternative and does not loop through billable models", async () => {
-    const fetch = vi
-      .fn()
-      .mockResolvedValueOnce(json({}, 404))
-      .mockResolvedValueOnce(
-        json({ models: [old, current, model("models/other")] }),
-      )
-      .mockResolvedValueOnce(json({}, 404));
-    vi.stubGlobal("fetch", fetch);
-    await expect(
-      generateLessonWithRecovery("A bat flew", saved),
-    ).rejects.toMatchObject({ code: "errorModelUnavailable" });
-    expect(fetch).toHaveBeenCalledTimes(3);
-  });
-  it("reports model availability when no other text model exists", async () => {
-    const fetch = vi
-      .fn()
-      .mockResolvedValueOnce(json({}, 404))
-      .mockResolvedValueOnce(
-        json({ models: [old, model("models/gemini-image")] }),
-      );
-    vi.stubGlobal("fetch", fetch);
-    await expect(
-      generateLessonWithRecovery("A bat flew", saved),
-    ).rejects.toMatchObject({ code: "errorModelUnavailable" });
-    expect(fetch).toHaveBeenCalledTimes(2);
+  it("does not retry a server-owned model 404 from the browser", async () => {
+    const fetchMock=vi.fn().mockResolvedValue(json({},404)); vi.stubGlobal("fetch",fetchMock);
+    await expect(generateLessonWithRecovery("A bat flew",saved)).rejects.toMatchObject({code:"errorModelUnavailable"});
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
   it.each([401, 429, 503])(
     "does not switch models for HTTP %s",

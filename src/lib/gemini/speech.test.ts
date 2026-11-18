@@ -5,41 +5,37 @@ const json = (value:unknown,status=200) => new Response(JSON.stringify(value),{s
 const models = {models:[{name:"models/test-flash-tts",displayName:"Test speech",supportedGenerationMethods:["generateContent"]}]};
 const sound = {candidates:[{content:{parts:[{inlineData:{mimeType:"audio/L16;codec=pcm;rate=24000",data:"AAD/fw=="}}]}}]};
 afterEach(() => vi.unstubAllGlobals());
-describe("Gemini speech", () => {
-  it("discovers a speech model and sends the key only in headers", async () => {
-    const fetch = vi.fn().mockResolvedValueOnce(json(models)).mockResolvedValueOnce(json(sound)); vi.stubGlobal("fetch",fetch);
+describe("Gemini speech via backend", () => {
+  it("posts text to backend without exposing any API key", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(json({audio:"AAD/fw==",mimeType:"audio/L16;rate=24000",model:"Test TTS"}));
+    vi.stubGlobal("fetch", fetchMock);
     const result = await generateSpeech("നമസ്കാരം", "test-key");
-    const [url,options] = fetch.mock.calls[1];
-    expect(url).toContain("models/test-flash-tts:generateContent");
-    expect(url).not.toContain("test-key"); expect(options.body).not.toContain("test-key");
-    expect(options.headers["x-goog-api-key"]).toBe("test-key");
-    expect(JSON.parse(options.body).generationConfig.responseModalities).toEqual(["AUDIO"]);
-    expect(options.cache).toBe("no-store");
-    expect(result.blob.type).toBe("audio/wav"); expect(result.blob.size).toBe(48);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe("/api/gemini/speech");
+    expect(JSON.parse(options.body)).toEqual({text:"നമസ്കാരം"});
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain("test-key");
+    expect(result.blob.type).toBe("audio/wav");
+    expect(result.blob.size).toBe(48);
   });
-  it("reports missing TTS access without trying a regular text model", async () => {
-    const fetch=vi.fn().mockResolvedValue(json({models:[{name:"models/text-only",supportedGenerationMethods:["generateContent"]}]})); vi.stubGlobal("fetch",fetch);
+  it("maps missing speech models", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({},404)));
     await expect(generateSpeech("Hello","test-key")).rejects.toMatchObject({code:"noSpeechModel"});
-    expect(fetch).toHaveBeenCalledTimes(1);
   });
-  it("does not retry quota errors", async () => {
-    const fetch=vi.fn().mockResolvedValueOnce(json(models)).mockResolvedValueOnce(json({},429)); vi.stubGlobal("fetch",fetch);
+  it("maps quota errors without retrying", async () => {
+    const fetchMock=vi.fn().mockResolvedValue(json({},429)); vi.stubGlobal("fetch",fetchMock);
     await expect(generateSpeech("Hello","test-key")).rejects.toMatchObject({code:"errorQuota"});
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
-  it("tries at most one other listed speech model on 404", async () => {
-    const fetch=vi.fn().mockResolvedValueOnce(json({models:[...models.models,{name:"models/test-pro-tts",supportedGenerationMethods:["generateContent"]}]})).mockResolvedValueOnce(json({},404)).mockResolvedValueOnce(json(sound)); vi.stubGlobal("fetch",fetch);
-    await expect(generateSpeech("Hello","test-key")).resolves.toHaveProperty("blob");
-    expect(fetch).toHaveBeenCalledTimes(3);
-  });
-  it("rejects non-audio output rather than playing malformed bytes", async () => {
-    vi.stubGlobal("fetch",vi.fn().mockResolvedValueOnce(json(models)).mockResolvedValueOnce(json({candidates:[{content:{parts:[{text:"Hello"}]}}]})));
+  it("rejects non-audio output", async () => {
+    vi.stubGlobal("fetch",vi.fn().mockResolvedValue(json({text:"Hello"})));
     await expect(generateSpeech("Hello","test-key")).rejects.toMatchObject({code:"errorData"});
   });
-  it("honors cancellation before requesting speech", async () => {
-    const ac=new AbortController();
-    vi.stubGlobal("fetch",vi.fn().mockImplementation(async () => { ac.abort(); return json(models); }));
+  it("honors cancellation before making a request", async () => {
+    const ac=new AbortController(); ac.abort();
+    const fetchMock=vi.fn(); vi.stubGlobal("fetch",fetchMock);
     await expect(generateSpeech("Hello","test-key",ac.signal)).rejects.toMatchObject({name:"AbortError"});
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 describe("PCM to browser audio", () => {

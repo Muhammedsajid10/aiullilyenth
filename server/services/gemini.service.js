@@ -69,7 +69,7 @@ export async function explainSentence(sentence) {
     });
 
     const response = await generateWithRetry(ai, {
-        model: "gemini-3.5-flash-lite",
+        model: process.env.GEMINI_TEXT_MODEL || "gemini-3.5-flash-lite",
         contents: sentence,
         config: {
             systemInstruction:
@@ -91,7 +91,7 @@ export async function explainSentence(sentence) {
  */
 async function isSentenceSafe(ai, sentence) {
     const response = await generateWithRetry(ai, {
-        model: "gemini-3.5-flash-lite",
+        model: process.env.GEMINI_TEXT_MODEL || "gemini-3.5-flash-lite",
         contents: [
             {
                 role: "user",
@@ -174,7 +174,7 @@ export async function createLesson(sentence) {
 
     // Request structured JSON output from Gemini.
     const response = await generateWithRetry(ai, {
-        model: "gemini-3.5-flash-lite",
+        model: process.env.GEMINI_TEXT_MODEL || "gemini-3.5-flash-lite",
         contents: [
             {
                 role: "user",
@@ -237,4 +237,110 @@ export async function createLesson(sentence) {
         sentence,
     };
 
+}
+
+
+// Server-owned speech and real-number requests: never expose the API key to clients.
+
+export async function createSpeech(text) {
+    const ai = new GoogleGenAI({
+        apiKey: process.env.GEMINI_API_KEY,
+        httpOptions: {
+            apiVersion: "v1beta",
+            timeout: 90000,
+        },
+    });
+
+    const model =
+        process.env.GEMINI_SPEECH_MODEL || "gemini-3.8-flash-tts";
+
+    const response = await ai.models.generateContent({
+        model,
+        contents: [{
+            role: "user",
+            parts: [{
+                text: `## Transcript:\n${text}`,
+            }],
+        }],
+        config: {
+            responseModalities: ["AUDIO"],
+            speechConfig: {
+                voiceConfig: {
+                    prebuiltVoiceConfig: {
+                        voiceName: "Fola",
+                    },
+                },
+            },
+        },
+    });
+
+    const audio = response.candidates?.[0]?.content?.parts
+        ?.find(part => part.inlineData?.mimeType?.startsWith("audio/"))
+        ?.inlineData;
+
+    if (!audio?.data || !audio?.mimeType) {
+        throw new Error("Gemini returned no audio");
+    }
+
+    const isPcm = /audio\/(?:L16|pcm)/i.test(audio.mimeType);
+
+    return {
+        audio: isPcm
+            ? pcmToWav(audio.data, audio.mimeType)
+            : audio.data,
+        mimeType: isPcm ? "audio/wav" : audio.mimeType,
+        model,
+    };
+
+
+
+
+    function pcmToWav(base64, mimeType) {
+        const pcm = Buffer.from(base64, "base64");
+
+        const rateMatch = mimeType.match(/rate=(\d+)/i);
+        const sampleRate = rateMatch ? Number(rateMatch[1]) : 24000;
+
+        const channels = 1;
+        const bitsPerSample = 16;
+        const byteRate = sampleRate * channels * bitsPerSample / 8;
+
+        const header = Buffer.alloc(44);
+        header.write("RIFF", 0);
+        header.writeUInt32LE(36 + pcm.length, 4);
+        header.write("WAVE", 8);
+        header.write("fmt ", 12);
+        header.writeUInt32LE(16, 16);
+        header.writeUInt16LE(1, 20);
+        header.writeUInt16LE(channels, 22);
+        header.writeUInt32LE(sampleRate, 24);
+        header.writeUInt32LE(byteRate, 28);
+        header.writeUInt16LE(channels * bitsPerSample / 8, 32);
+        header.writeUInt16LE(bitsPerSample, 34);
+        header.write("data", 36);
+        header.writeUInt32LE(pcm.length, 40);
+
+        return Buffer.concat([header, pcm]).toString("base64");
+    }
+
+}
+
+
+export async function createRealNumbers(sentence, words) {
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY, httpOptions: { timeout: 30000 } });
+    const models = await fetchGeminiModels();
+    const embedding = models.find(m => m.supportedGenerationMethods.includes("embedContent"));
+    if (!embedding) { const error = new Error("No embedding model available"); error.code = "NO_EMBEDDING_MODEL"; throw error; }
+    const [count, vectors] = await Promise.all([
+        ai.models.countTokens({ model: process.env.GEMINI_TEXT_MODEL || "gemini-3.5-flash-lite", contents: sentence }),
+        Promise.all(words.map(async word => {
+            const data = await ai.models.embedContent({ model: embedding.name.replace(/^models\//, ""), contents: word });
+            const values = data.embeddings?.[0]?.values;
+            if (!Array.isArray(values) || !values.length || values.length > 32768 || !values.every(Number.isFinite)) throw new Error("Invalid embedding");
+            return { word, values };
+        }))
+    ]);
+    if (!Number.isInteger(count.totalTokens) || count.totalTokens < 0) throw new Error("Invalid token count");
+    if (vectors.some(v => v.values.length !== vectors[0].values.length)) throw new Error("Mismatched embedding dimensions");
+    return { count: count.totalTokens, vectors };
 }

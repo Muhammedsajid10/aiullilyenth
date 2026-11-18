@@ -2,6 +2,8 @@ import {
     fetchGeminiModels,
     explainSentence,
     createLesson,
+    createSpeech,
+    createRealNumbers,
 } from "../services/gemini.service.js";
 
 import { z } from 'zod'
@@ -137,10 +139,12 @@ export async function generateLesson(req, res) {
             lesson,
         });
 
+
     } catch (error) {
         console.error("Lesson generation failed:", {
             name: error?.name,
             status: error?.status,
+            message: error?.message,
         });
 
         return res.status(502).json({
@@ -148,4 +152,56 @@ export async function generateLesson(req, res) {
             error: "Unable to generate lesson",
         });
     }
+
+}
+
+
+const speechSchema = z.object({ text: z.string().trim().min(1).max(5000) });
+const realSchema = z.object({ sentence: z.string().trim().min(1).max(300), words: z.array(z.string().trim().min(1).max(100)).min(2).max(6) });
+
+export async function generateSpeech(req, res) {
+    const parsed = speechSchema.safeParse(req.body);
+
+    if (!parsed.success) {
+        return res.status(400).json({
+            error: "Invalid speech text"
+        });
+    }
+
+    if (!process.env.GEMINI_API_KEY) {
+        return res.status(503).json({
+            error: "AI service not configured"
+        });
+    }
+
+    try {
+        const result = await createSpeech(parsed.data.text);
+        return res.json(result);
+
+    } catch (error) {
+        console.error("Speech generation failed:", {
+            name: error?.name,
+            status: error?.status,
+            code: error?.code,
+            message: error?.message
+        });
+
+        const status =
+            error?.code === "NO_SPEECH_MODEL" ? 404 :
+            Number(error?.status) === 429 ? 429 : 502;
+
+        return res.status(status).json({
+            error: error?.code === "NO_SPEECH_MODEL"
+                ? "NO_SPEECH_MODEL"
+                : "Speech unavailable"
+        });
+    }
+}
+
+export async function getRealNumbers(req, res) {
+    const parsed = realSchema.safeParse(req.body);
+    if (!parsed.success || parsed.data.sentence.split(/\s+/).length > 12) return res.status(400).json({ error: "Invalid real-number request" });
+    if (!process.env.GEMINI_API_KEY) return res.status(503).json({ error: "AI service not configured" });
+    try { return res.json(await createRealNumbers(parsed.data.sentence, parsed.data.words)); }
+    catch (error) { console.error("Real numbers failed:", { name: error?.name, status: error?.status }); return res.status(Number(error?.status) === 429 ? 429 : 502).json({ error: "Real-number service unavailable" }); }
 }

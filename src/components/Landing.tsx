@@ -18,7 +18,7 @@ export default function Landing({ lang, onStart, onSetup, onCustom, hasKey }: { 
         <p>{ml ? "മലയാളത്തിലോ ഇംഗ്ലീഷിലോ ഒരു വാക്കോ വാക്യമോ എഴുതൂ. അതിലെ കഷണങ്ങളും അക്കങ്ങളും വാക്കുകൾ തമ്മിലുള്ള ബന്ധവും നമുക്ക് ബോർഡിൽ കണ്ടുപഠിക്കാം." : "Type a word or sentence in Malayalam or English. Explore its pieces, numbers, and word connections through a guided board lesson."}</p>
         <a className="scope-jump" href="#about-llms" onClick={e => { e.preventDefault(); document.getElementById("about-llms")?.scrollIntoView({block:"start"}); document.getElementById("about-llms")?.focus({preventScroll:true}); }}>{ml ? "AI, LLM, chat apps — വ്യത്യാസവും സ്രോതസ്സുകളും ↓" : "AI, LLMs & chat apps: see the difference and sources ↓"}</a>
         <ol className="hero-steps">
-          <li><b>1</b>{ml ? "Gemini API key ചേർക്കൂ" : "Add a Gemini API key"}</li>
+          <li><b>1</b>{ml ? "പഠിക്കാൻ ഒരു വാക്യം തിരഞ്ഞെടുക്കൂ" : "Choose a sentence to explore"}</li>
           <li><b>2</b>{ml ? "ഒരു വാക്കോ വാക്യമോ എഴുതൂ" : "Enter a word or sentence"}</li>
           <li><b>3</b>{ml ? "കണ്ടു പഠിക്കൂ, ചെയ്തുനോക്കൂ" : "Watch, listen & explore"}</li>
         </ol>
@@ -26,17 +26,17 @@ export default function Landing({ lang, onStart, onSetup, onCustom, hasKey }: { 
       </div>
       <section className="hero-input-card" aria-labelledby="hero-key-title">
         <span className="game-badge">{ml ? "ഇവിടെ തുടങ്ങാം" : "Start here"}</span>
-        <h2 id="hero-key-title">{ml ? "🔑 പരീക്ഷിക്കാൻ API key വേണം" : "🔑 An API key powers your lesson"}</h2>
-        <p>{ml ? "ഈ വെബ്സൈറ്റിൽ നീ നൽകുന്ന വാക്കുകൾ പരീക്ഷിക്കാൻ Gemini API key ആവശ്യമാണ്. ആദ്യം ഒരു മുതിർന്ന ആളിന്റെ സഹായത്തോടെ അത് ചേർക്കാം." : "To explore words you enter on this website, you need a Gemini API key. Ask a grown-up to help with setup."}</p>
-        {hasKey && <p className="success">{ml ? "ഒരു key സേവ് ചെയ്തിട്ടുണ്ട്. ഇനി വാക്യം നൽകി തുടരാം." : "A key is saved. Enter your sentence to continue."}</p>}
+        <h2 id="hero-key-title">{ml ? "✨ നിന്റെ വാക്യം പരീക്ഷിക്കാം" : "✨ Explore your own sentence"}</h2>
+        <p>{ml ? "ഒരു വാക്യം എഴുതൂ. സുരക്ഷിതമായ സെർവർ വഴി Gemini പാഠം തയ്യാറാക്കും." : "Enter a sentence to create a guided lesson using Gemini through our server. No personal API key is needed."}</p>
+
         <form onSubmit={e => { e.preventDefault(); if (wordCount <= 12) onCustom(input.trim()); }}>
           <label htmlFor="hero-sentence">{ml ? "എന്താണ് പരീക്ഷിക്കേണ്ടത്?" : "What would you like to explore?"}</label>
-          <textarea id="hero-sentence" value={input} maxLength={300} onChange={e => setInput(e.target.value)} placeholder={ml ? "ഇവിടെ ഒരു വാക്കോ വാക്യമോ എഴുതൂ…" : "Type a word or sentence here…"} aria-describedby="hero-input-help" required={hasKey} />
+          <textarea id="hero-sentence" value={input} maxLength={300} onChange={e => setInput(e.target.value)} placeholder={ml ? "ഇവിടെ ഒരു വാക്കോ വാക്യമോ എഴുതൂ…" : "Type a word or sentence here…"} aria-describedby="hero-input-help" required />
           <p id="hero-input-help" className={wordCount > 12 ? "error" : "landing-note"}>{ml ? "മലയാളം / English · 12 വാക്കുകൾ വരെ" : "Malayalam / English · Up to 12 words"} · {wordCount}/12</p>
-          <button type="submit" className="primary full-width" disabled={wordCount > 12}>{hasKey ? (ml ? "ഈ വാക്യവുമായി തുടരാം →" : "Continue with this input →") : (ml ? "API key ചേർക്കാം · ഘട്ടങ്ങൾ കാണൂ →" : "Set up API key · Show the steps →")}</button>
+          <button type="submit" className="primary full-width" disabled={wordCount > 12}>{ml ? "ഈ വാക്യവുമായി തുടരാം →" : "Continue with this input →"}</button>
         </form>
-        <p className="landing-note">{ml ? "നീ എഴുതിയത് key ചേർക്കുമ്പോഴും ഇവിടെ ഉണ്ടാകും. പാഠം തുടങ്ങുമ്പോൾ വാക്യം Google-ലേക്ക് അയയ്ക്കും." : "Your text stays here during setup. It is sent to Google when you start generating the lesson."}</p>
-        {hasKey && <button onClick={onSetup}>{ml ? "API key ക്രമീകരണം" : "API key settings"}</button>}
+        <p className="landing-note">{ml ? "പാഠം തയ്യാറാക്കാൻ നിന്റെ വാക്യം Google-ലേക്ക് അയയ്ക്കും." : "Your sentence is sent to Google when generating the lesson."}</p>
+
         <div className="hero-demo-link"><button onClick={onStart}>{ml ? "ആദ്യം ഒരു തയ്യാറാക്കിയ ഉദാഹരണം കാണാം" : "Preview a ready-made example first"}</button><small>{ml ? "ഉദാഹരണങ്ങൾ കാണാൻ key വേണ്ട." : "Examples need no key."}</small></div>
       </section>
     </section>
@@ -64,7 +64,7 @@ export default function Landing({ lang, onStart, onSetup, onCustom, hasKey }: { 
       </div>
     </section>
     <details className="grownup-notes"><summary>{ml ? "രക്ഷിതാക്കൾക്കും അധ്യാപകർക്കും" : "For parents & teachers"}</summary>
-      <p>{ml ? "മലയാളത്തിലും ലളിതമായ ഇംഗ്ലീഷിലും പഠിക്കാം. തയ്യാറായ പാഠങ്ങൾക്ക് അക്കൗണ്ടോ API key-യോ വേണ്ട. സ്വന്തം വാക്യങ്ങൾക്കുള്ള Gemini ക്രമീകരണം മുതിർന്ന ഒരാളുടെ സഹായത്തോടെ ഉപയോഗിക്കാം." : "Learn in Malayalam and simple English. Built-in lessons need no account or API key. An adult can help set up Gemini for custom sentences."}</p>
+      <p>{ml ? "മലയാളത്തിലും ലളിതമായ ഇംഗ്ലീഷിലും പഠിക്കാം. തയ്യാറായ പാഠങ്ങൾക്ക് അക്കൗണ്ടോ API key-യോ വേണ്ട. സ്വന്തം വാക്യങ്ങൾ സെർവർ വഴി Gemini ഉപയോഗിച്ച് പഠിക്കാം." : "Learn in Malayalam and simple English. Built-in lessons need no account or API key. Custom sentences use Gemini through the server; visitors do not enter an API key."}</p>
       <p>{ml ? "ഇവ ആശയം പഠിപ്പിക്കുന്ന ചെറിയ മാതൃകകളാണ്; യഥാർത്ഥ AI-യുടെ ഉള്ളിലെ കണക്കുകളല്ല. പാഠങ്ങളിൽ NLP, LLM, ചരിത്രം, ഗവേഷണസ്രോതസ്സുകൾ എന്നിവയും ഉണ്ട്." : "These are small teaching models, not measurements inside a real AI. Lessons also include NLP, LLMs, research history and original sources."}</p>
       <a href="https://arxiv.org/abs/1706.03762" target="_blank" rel="noreferrer">Attention Is All You Need · Original research ↗</a>
     </details>

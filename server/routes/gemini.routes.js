@@ -2,7 +2,7 @@
 import { Router } from "express";
 
 
-import { getModels, generateExplanation,generateLesson,} from "../controllers/gemini.controller.js";
+import { getModels, generateExplanation,generateLesson, generateSpeech, getRealNumbers,} from "../controllers/gemini.controller.js";
 
 const router = Router();
 
@@ -14,5 +14,10 @@ router.post("/explain", generateExplanation);
 
 // POST: Generate a structured AI learning lesson
 router.post("/lesson", generateLesson);
+
+
+
+router.post("/speech", generateSpeech);
+router.post("/real-numbers", getRealNumbers);
 
 export default router;
