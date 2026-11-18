@@ -15,8 +15,8 @@ const dimensionSchema = z.object({
 // Each word and its visualization coordinates.
 const wordSchema = z.object({
   text: str(40),
-  x: z.number().finite(),
-  y: z.number().finite(),
+  x: z.number().int().min(0).max(10),
+  y: z.number().int().min(0).max(10),
   meaning_ml: str(160),
 });
 
